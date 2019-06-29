@@ -34,9 +34,6 @@ func GetJobName(ctx context.Context) string {
 	return name
 }
 
-// ErrCanceled is returned when the job is running but canceled.
-var ErrCanceled = fmt.Errorf("the job is canceled")
-
 // Runner is used to represent the runner of the job.
 type Runner func(context.Context) (data []byte, err error)
 
