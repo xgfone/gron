@@ -155,35 +155,40 @@ func NewExecutor() *Executor {
 }
 
 // AppendJobResultHook appends the hook to handle the result of the job.
-func (exe *Executor) AppendJobResultHook(hook func(Task, []byte, error)) {
-	if hook == nil {
-		panic("the hook must not be nil")
+func (exe *Executor) AppendJobResultHook(hooks ...func(Task, []byte, error)) {
+	for _, hook := range hooks {
+		if hook == nil {
+			panic("the hook must not be nil")
+		}
 	}
 
 	exe.lock.Lock()
-	exe.resultHooks = append(exe.resultHooks, hook)
+	exe.resultHooks = append(exe.resultHooks, hooks...)
 	exe.lock.Unlock()
 }
 
 // AppendJobScheduleHook appends the hook to watch which job is scheduled.
-func (exe *Executor) AppendJobScheduleHook(hook func(Job)) {
-	if hook == nil {
-		panic("the hook must not be nil")
+func (exe *Executor) AppendJobScheduleHook(hooks ...func(Job)) {
+	for _, hook := range hooks {
+		if hook == nil {
+			panic("the hook must not be nil")
+		}
 	}
 
 	exe.lock.Lock()
-	exe.addHooks = append(exe.addHooks, hook)
+	exe.addHooks = append(exe.addHooks, hooks...)
 	exe.lock.Unlock()
 }
 
 // AppendJobCancelHook appends the hook to watch which job is canceled.
-func (exe *Executor) AppendJobCancelHook(hook func(Job)) {
-	if hook == nil {
-		panic("the hook must not be nil")
+func (exe *Executor) AppendJobCancelHook(hooks ...func(Job)) {
+	for _, hook := range hooks {
+		if hook == nil {
+			panic("the hook must not be nil")
+		}
 	}
-
 	exe.lock.Lock()
-	exe.deleteHooks = append(exe.deleteHooks, hook)
+	exe.deleteHooks = append(exe.deleteHooks, hooks...)
 	exe.lock.Unlock()
 }
 

@@ -41,14 +41,14 @@ func MustParseWhen(s string) When {
 // a argument. And the directives and its arguments are separated by one or more
 // spaces.
 //
-// The supported directives has
+// The supported directives have
 //   @base  now/prev // The next time is based on the now or previous(default) time to be calculated.
 //   @every Duration // The next time is calculated by adding the interval duration.
 //   @delay Duration // For the first time, it will be delayed back for the duration.
 //   @end   RFC3339  // When the deadline is reached, the job will end.
 //   @total int(>0)  // When the job is run for total times, it will end.
 //   @once           // It is equal to "@total 1".
-//   @at    crontab  // Cron format, which has not been implemented yet.
+//   @at    crontab  // Crontab format, which has not been implemented yet.
 //
 // Here are the few quick references about crontab simple but powerful syntax.
 //
