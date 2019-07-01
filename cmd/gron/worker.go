@@ -39,12 +39,12 @@ var shellCMD = "/bin/sh"
 var workerOpts = []gconf.Opt{
 	gconf.StrOpt("addr", "The address to listen to.").D(":8002"),
 	gconf.StrOpt("log-level", "The log level, such as debug, info, etc.").D("info"),
-	gconf.StrOpt("log-file", "The log file path."),
+	gconf.StrOpt("log-file", "The log file path, and the log is output to os.Stdout by default."),
 	gconf.StrOpt("shell", "The shell path.").D("/bin/sh"),
 	gconf.DurationOpt("timeout", "The default global timeout.").D(time.Minute),
 	gconf.StrSliceOpt("job-schedule-hooks", "The comma-separated url lists to be called when a job is scheduled."),
 	gconf.StrSliceOpt("job-cancel-hooks", "The comma-separated url lists to be called when a job is canceled."),
-	gconf.StrSliceOpt("job-result-hooks", "The comma-separated url lists to be called after a job is called."),
+	gconf.StrSliceOpt("job-result-hooks", "The comma-separated url lists to be called when a job is called."),
 }
 
 func init() {
@@ -56,6 +56,7 @@ func getWorkerCommand() cli.Command {
 
 	return cli.Command{
 		Name:  "worker",
+		Usage: "An gron runner worker like crontab, but more powerful",
 		Flags: gconf.ConvertOptsToCliFlags(conf),
 		Action: func(ctx *cli.Context) error {
 			if err := gconf.LoadSource(gconf.NewCliSource(ctx, "worker")); err != nil {
@@ -74,8 +75,8 @@ func getWorkerCommand() cli.Command {
 				conf.GetDuration("timeout"))
 
 			router := ship.New(ship.SetLogger(klog.ToFmtLoggerError(klog.Std)))
-			router.R("/job").POST(handler.AddJob).GET(handler.GetJobs)
-			router.R("/job/:name").GET(handler.GetJob).DELETE(handler.DeleteJob)
+			router.R("/v1/job").POST(handler.AddJob).GET(handler.GetJobs)
+			router.R("/v1/job/:name").GET(handler.GetJob).DELETE(handler.DeleteJob)
 			router.Start(conf.GetString("addr")).Wait()
 			return nil
 		},
