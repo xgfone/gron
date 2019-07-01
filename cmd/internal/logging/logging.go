@@ -14,7 +14,23 @@
 
 package logging
 
+import (
+	"github.com/xgfone/go-tools/lifecycle"
+	"github.com/xgfone/klog"
+)
+
 // Init initializes the logging.
-func Init(level, file string) error {
+func Init(level, filepath string) error {
+	if filepath != "" {
+		file, err := klog.NewSizedRotatingFile(filepath, 100*1024*1024, 100)
+		if err != nil {
+			return err
+		}
+		lifecycle.Register(func() { file.Close() })
+		klog.Std = klog.Std.WithWriter(klog.StreamWriter(file))
+	}
+
+	klog.Std = klog.Std.WithLevel(klog.NameToLevel(level)).WithKv("caller", klog.Caller())
+	klog.AppendCleaner(lifecycle.Stop)
 	return nil
 }

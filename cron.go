@@ -65,6 +65,22 @@ type Job struct {
 	Callback func(task Task, data []byte, err error)
 }
 
+// MarshalJSON implements json.Marshaler.
+func (j Job) MarshalJSON() ([]byte, error) {
+	buf := bytes.NewBuffer(nil)
+	buf.Grow(128)
+	buf.WriteByte('{')
+	fmt.Fprintf(buf, `"name":"%s",`, j.Name)
+	fmt.Fprintf(buf, `"when":"%s",`, j.When.String())
+	fmt.Fprintf(buf, `"timeout":"%s",`, j.Timeout.String())
+
+	buf.WriteString(`"retry":{`)
+	fmt.Fprintf(buf, `"number":%d,`, j.Retry.Number)
+	fmt.Fprintf(buf, `"interval":"%s"`, j.Retry.Interval)
+	buf.WriteString("}}")
+	return buf.Bytes(), nil
+}
+
 // Task represents a job task.
 type Task struct {
 	Job  Job

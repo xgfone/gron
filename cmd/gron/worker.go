@@ -17,21 +17,75 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
 	"net/url"
 	"os/exec"
 	"strings"
 	"time"
 
-	"github.com/xgfone/klog"
-
+	"github.com/urfave/cli"
+	"github.com/xgfone/gconf"
+	"github.com/xgfone/go-tools/lifecycle"
 	"github.com/xgfone/gron"
+	"github.com/xgfone/gron/cmd/internal/logging"
+	"github.com/xgfone/klog"
 	"github.com/xgfone/ship"
 )
+
+var shellCMD = "/bin/sh"
+
+var workerOpts = []gconf.Opt{
+	gconf.StrOpt("addr", "The address to listen to.").D(":8002"),
+	gconf.StrOpt("log-level", "The log level, such as debug, info, etc.").D("info"),
+	gconf.StrOpt("log-file", "The log file path."),
+	gconf.StrOpt("shell", "The shell path.").D("/bin/sh"),
+	gconf.DurationOpt("timeout", "The default global timeout.").D(time.Minute),
+	gconf.StrSliceOpt("job-schedule-hooks", "The comma-separated url lists to be called when a job is scheduled."),
+	gconf.StrSliceOpt("job-cancel-hooks", "The comma-separated url lists to be called when a job is canceled."),
+	gconf.StrSliceOpt("job-result-hooks", "The comma-separated url lists to be called after a job is called."),
+}
+
+func init() {
+	gconf.NewGroup("worker").RegisterOpts(workerOpts)
+}
+
+func getWorkerCommand() cli.Command {
+	conf := gconf.Group("worker")
+
+	return cli.Command{
+		Name:  "worker",
+		Flags: gconf.ConvertOptsToCliFlags(conf),
+		Action: func(ctx *cli.Context) error {
+			if err := gconf.LoadSource(gconf.NewCliSource(ctx, "worker")); err != nil {
+				return err
+			}
+
+			err := logging.Init(conf.GetString("log-level"), conf.GetString("log-file"))
+			if err != nil {
+				return err
+			}
+
+			shellCMD = conf.GetString("shell")
+			handler := newWorkerHandler(conf.GetStringSlice("job-schedule-hooks"),
+				conf.GetStringSlice("job-cancel-hooks"),
+				conf.GetStringSlice("job-result-hooks"),
+				conf.GetDuration("timeout"))
+
+			router := ship.New(ship.SetLogger(klog.ToFmtLoggerError(klog.Std)))
+			router.R("/job").POST(handler.AddJob).GET(handler.GetJobs)
+			router.R("/job/:name").GET(handler.GetJob).DELETE(handler.DeleteJob)
+			router.Start(conf.GetString("addr")).Wait()
+			return nil
+		},
+	}
+}
 
 func newWorkerHandler(jobScheduleHooks, jobCancelHooks, jobResultHooks []string,
 	timeout time.Duration) workerHandler {
 	exe := gron.NewExecutor()
+	lifecycle.Register(exe.Close)
 
 	var jobSchedules []func(gron.Job)
 	for _, u := range jobScheduleHooks {
@@ -102,8 +156,6 @@ func (h workerHandler) AddJob(ctx *ship.Context) (err error) {
 		return ctx.String(400, err.Error())
 	} else if task.Name == "" {
 		return ctx.String(400, "missing name")
-	} else if task.Runner == "" {
-		return ctx.String(400, "missing runner")
 	} else if task.When == "" {
 		return ctx.String(400, "missing when")
 	} else if when, err = gron.ParseWhen(task.When); err != nil {
@@ -113,12 +165,24 @@ func (h workerHandler) AddJob(ctx *ship.Context) (err error) {
 			return ctx.String(400, "invalid callback: %s", err.Error())
 		}
 		callback = newHTTPJobResultFunc(task.Callback)
-	} else if strings.HasPrefix(task.Runner, "shell ") {
+	}
+
+	if task.Runner == "" {
+		return ctx.String(400, "missing runner")
+	} else if strings.HasPrefix(task.Runner, "shell ") { // Shell Runner
 		if cmd := strings.TrimSpace(task.Runner[6:]); cmd != "" {
 			runner = newShellJobRunner(cmd)
 		} else {
-			return ctx.String(400, "invalid runner")
+			return ctx.String(400, "invalid shell runner")
 		}
+	} else if strings.HasPrefix(task.Runner, "bin ") { // Binary Runner
+		if cmd := strings.TrimSpace(task.Runner[4:]); cmd != "" {
+			runner = newBinJobRunner(cmd)
+		} else {
+			return ctx.String(400, "invalid bin runner")
+		}
+	} else {
+		return ctx.String(400, "invalid runner")
 	}
 
 	if task.Timeout <= 0 && h.timeout > 0 {
@@ -162,23 +226,70 @@ func (h workerHandler) GetJobs(ctx *ship.Context) error {
 	return ctx.JSON(200, map[string]interface{}{"tasks": h.executor.GetAllTasks()})
 }
 
-//////
+//////////////////////////////////////////////////////////////////////////////
 
 func newHTTPJobScheduleFunc(url string) func(gron.Job) {
-	return nil
+	timeout := time.Second * 5
+	return func(job gron.Job) {
+		bs, _ := job.MarshalJSON()
+		req, _ := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(bs))
+		req.Header.Set(ship.HeaderContentType, ship.MIMEApplicationJSONCharsetUTF8)
+		req.Header.Set("X-Gron-Action", "schedule")
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		if resp, err := http.DefaultClient.Do(req.WithContext(ctx)); err != nil {
+			klog.K("job", job.Name).K("url", url).E(err).Errorf("faild to send job schedule notice")
+		} else {
+			resp.Body.Close()
+		}
+		cancel()
+	}
 }
 
 func newHTTPJobCancelFunc(url string) func(gron.Job) {
-	return nil
+	timeout := time.Second * 5
+	return func(job gron.Job) {
+		bs, _ := job.MarshalJSON()
+		req, _ := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(bs))
+		req.Header.Set(ship.HeaderContentType, ship.MIMEApplicationJSONCharsetUTF8)
+		req.Header.Set("X-Gron-Action", "cancel")
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		if resp, err := http.DefaultClient.Do(req.WithContext(ctx)); err != nil {
+			klog.K("job", job.Name).K("url", url).E(err).Errorf("faild to send job cancel notice")
+		} else {
+			resp.Body.Close()
+		}
+		cancel()
+	}
 }
 
 func newHTTPJobResultFunc(url string) func(gron.Task, []byte, error) {
-	return nil
+	return func(task gron.Task, data []byte, err error) {
+		var _err interface{}
+		if err != nil {
+			_err = err.Error()
+		}
+		bs, _ := json.Marshal(map[string]interface{}{"data": string(data), "err": _err})
+		resp, err := http.Post(url, ship.MIMEApplicationJSONCharsetUTF8, bytes.NewBuffer(bs))
+		if err != nil {
+			klog.K("job", task.Job.Name).K("url", url).E(err).Errorf("faild to send job result")
+		} else {
+			resp.Body.Close()
+		}
+	}
 }
 
 func newShellJobRunner(cmd string) func(context.Context) ([]byte, error) {
+	return newJobRunner(shellCMD, "-c", cmd)
+}
+
+func newBinJobRunner(cmd string) func(context.Context) ([]byte, error) {
+	cmds := strings.Fields(cmd)
+	return newJobRunner(cmds[0], cmds[1:]...)
+}
+
+func newJobRunner(name string, args ...string) func(context.Context) ([]byte, error) {
 	return func(ctx context.Context) (data []byte, err error) {
-		cmd := exec.CommandContext(ctx, "/bin/sh", "-c", cmd)
+		cmd := exec.CommandContext(ctx, name, args...)
 		var output bytes.Buffer
 		var errput bytes.Buffer
 		cmd.Stdout = &output

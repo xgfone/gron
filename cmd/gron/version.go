@@ -14,21 +14,4 @@
 
 package main
 
-import (
-	"os"
-
-	"github.com/urfave/cli"
-	"github.com/xgfone/go-tools/lifecycle"
-	"github.com/xgfone/klog"
-)
-
-func main() {
-	app := cli.NewApp()
-	app.Version = version
-	app.Usage = "A crontab service"
-	app.Commands = []cli.Command{getWorkerCommand()}
-	if err := app.Run(os.Args); err != nil {
-		klog.E(err).Errorf("The program exits.")
-	}
-	lifecycle.Stop()
-}
+var version = "1.0.0"
