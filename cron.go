@@ -230,6 +230,8 @@ func (exe *Executor) ScheduleJob(job Job) (ok bool) {
 		panic("the job when must not be nil")
 	} else if job.Run == nil {
 		panic("the job runner must not be nil")
+	} else if job.Retry.Number < 0 {
+		panic("the job return number must not be negative")
 	}
 
 	next := job.When.Next(time.Time{})
@@ -410,7 +412,10 @@ func (exe *Executor) retryToRunJob(ctx context.Context, job Job) (data []byte, e
 		}
 	}()
 
-	for number := job.Retry.Number; number > -1; number-- {
+	for number := 0; number <= job.Retry.Number; number-- {
+		if number > 0 && job.Retry.Interval > 0 {
+			time.Sleep(job.Retry.Interval)
+		}
 		if data, err = job.Run(ctx); err == nil {
 			return
 		}

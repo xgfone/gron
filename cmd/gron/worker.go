@@ -166,6 +166,8 @@ func (h workerHandler) AddJob(ctx *ship.Context) (err error) {
 			return ctx.String(400, "invalid callback: %s", err.Error())
 		}
 		callback = newHTTPJobResultFunc(task.Callback)
+	} else if task.Retry.Number < 0 {
+		return ctx.String(400, "the retry number must not be negative")
 	}
 
 	if task.Runner == "" {
