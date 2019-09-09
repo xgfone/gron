@@ -59,9 +59,7 @@ func getWorkerCommand() cli.Command {
 		Usage: "An gron runner worker like crontab, but more powerful",
 		Flags: gconf.ConvertOptsToCliFlags(conf),
 		Action: func(ctx *cli.Context) error {
-			if err := gconf.LoadSource(gconf.NewCliSource(ctx, "worker")); err != nil {
-				return err
-			}
+			gconf.LoadSource(gconf.NewCliSource(ctx, "worker"))
 
 			err := logging.Init(conf.GetString("log-level"), conf.GetString("log-file"))
 			if err != nil {
