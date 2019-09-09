@@ -7,3 +7,5 @@ require (
 	github.com/xgfone/klog v1.6.0
 	github.com/xgfone/ship v1.4.2
 )
+
+go 1.11
