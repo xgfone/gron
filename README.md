@@ -2,7 +2,7 @@
 
 Another job periodic runner like `crontab`. See [GoDoc](https://godoc.org/github.com/xgfone/gron).
 
-The supported Go version: `1.10+`.
+The supported Go version: `1.11+`.
 
 ## Example
 
