@@ -138,6 +138,9 @@ func (ts jobTasks) Swap(i, j int) {
 	ts[j] = t
 }
 
+// Middleware is used to return a new job based on the old one.
+type Middleware func(Job) Job
+
 // Executor represents a task executor.
 type Executor struct {
 	lock  *sync.RWMutex
@@ -147,6 +150,7 @@ type Executor struct {
 	addHooks    []func(Job)
 	deleteHooks []func(Job)
 	resultHooks []func(Task, []byte, error)
+	middlewares []Middleware
 
 	adds    chan Job
 	deletes chan Job
@@ -168,6 +172,11 @@ func NewExecutor() *Executor {
 	go exe.watchJob()
 
 	return exe
+}
+
+// AddMiddleware adds the some middlewares.
+func (exe *Executor) AddMiddleware(mws ...Middleware) {
+	exe.middlewares = append(exe.middlewares, mws...)
 }
 
 // AppendJobResultHook appends the hook to handle the result of the job.
@@ -411,6 +420,10 @@ func (exe *Executor) retryToRunJob(ctx context.Context, job Job) (data []byte, e
 			err = fmt.Errorf("job '%s' panic: %v", job.Name, err)
 		}
 	}()
+
+	for _, m := range exe.middlewares {
+		job = m(job)
+	}
 
 	for number := 0; number <= job.Retry.Number; number-- {
 		if number > 0 && job.Retry.Interval > 0 {
