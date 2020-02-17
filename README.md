@@ -17,18 +17,18 @@ import (
 	"github.com/xgfone/gron"
 )
 
-func job(ctx context.Context) (data []byte, err error) {
+func job(ctx context.Context) (data interface{}, err error) {
 	// TODO:)
 	fmt.Printf("Running job '%s'\n", gron.GetJobName(ctx))
 	return
 }
 
-func jcb(task gron.Task, data []byte, err error) {
+func jcb(task gron.Task, data interface{}, err error) {
 	// TODO:)
 	fmt.Printf("Job callback: job '%s' end\n", task.Job.Name)
 }
 
-func gcb(task gron.Task, data []byte, err error) {
+func gcb(task gron.Task, data interface{}, err error) {
 	// TODO:)
 	fmt.Printf("Global callback: job '%s' end\n", task.Job.Name)
 }
