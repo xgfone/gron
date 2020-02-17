@@ -1,11 +1,9 @@
 module github.com/xgfone/gron
 
-require (
-	github.com/urfave/cli v1.20.0
-	github.com/xgfone/gconf v3.3.0+incompatible
-	github.com/xgfone/go-tools v5.11.0+incompatible
-	github.com/xgfone/klog v1.6.0
-	github.com/xgfone/ship v1.4.2
-)
-
 go 1.11
+
+require (
+	github.com/urfave/cli v1.22.2 // indirect
+	github.com/xgfone/go-tools/v6 v6.1.0 // indirect
+	github.com/xgfone/klog/v3 v3.0.0 // indirect
+)

@@ -27,12 +27,11 @@ import (
 	"time"
 
 	"github.com/urfave/cli"
-	"github.com/xgfone/gconf"
-	"github.com/xgfone/go-tools/lifecycle"
+	"github.com/xgfone/gconf/v4"
+	"github.com/xgfone/go-tools/v6/lifecycle"
 	"github.com/xgfone/gron"
-	"github.com/xgfone/gron/cmd/internal/logging"
-	"github.com/xgfone/klog"
-	"github.com/xgfone/ship"
+	"github.com/xgfone/klog/v3"
+	"github.com/xgfone/ship/v2"
 )
 
 var shellCMD = "/bin/sh"
@@ -52,6 +51,21 @@ func init() {
 	gconf.NewGroup("worker").RegisterOpts(workerOpts)
 }
 
+func initLogging(level, filepath string) error {
+	log := klog.GetDefaultLogger()
+	log.SetLevel(klog.NameToLevel(level))
+	if filepath != "" {
+		file, err := klog.FileWriter(filepath, "100M", 100)
+		if err != nil {
+			return err
+		}
+		lifecycle.Register(func() { file.Close() })
+		log.Encoder().SetWriter(file)
+	}
+	klog.SetDefaultLogger(log.WithCtx(klog.Caller("caller")))
+	return nil
+}
+
 func getWorkerCommand() cli.Command {
 	conf := gconf.Group("worker")
 
@@ -62,7 +76,7 @@ func getWorkerCommand() cli.Command {
 		Action: func(ctx *cli.Context) error {
 			gconf.LoadSource(gconf.NewCliSource(ctx, "worker"))
 
-			err := logging.Init(conf.GetString("log-level"), conf.GetString("log-file"))
+			err := initLogging(conf.GetString("log-level"), conf.GetString("log-file"))
 			if err != nil {
 				return err
 			}
@@ -73,7 +87,8 @@ func getWorkerCommand() cli.Command {
 				conf.GetStringSlice("job-result-hooks"),
 				conf.GetDuration("timeout"))
 
-			router := ship.New(ship.SetLogger(klog.ToFmtLoggerError(klog.Std)))
+			router := ship.Default()
+			router.SetLogger(klog.ToFmtLogger(klog.GetDefaultLogger()))
 			router.R("/v1/job").POST(handler.AddJob).GET(handler.GetJobs)
 			router.R("/v1/job/:name").GET(handler.GetJob).DELETE(handler.DeleteJob)
 			router.Start(conf.GetString("addr")).Wait()
@@ -115,14 +130,20 @@ func newWorkerHandler(jobScheduleHooks, jobCancelHooks, jobResultHooks []string,
 	exe.AppendJobCancelHook(jobCacnels...)
 	exe.AppendJobScheduleHook(jobSchedules...)
 
-	exe.AppendJobScheduleHook(func(job gron.Job) { klog.K("job", job.Name).Infof("add the job") })
-	exe.AppendJobCancelHook(func(job gron.Job) { klog.K("job", job.Name).Infof("remove the job") })
+	exe.AppendJobScheduleHook(func(job gron.Job) {
+		klog.Info("add the job", klog.F("job", job.Name))
+	})
+	exe.AppendJobCancelHook(func(job gron.Job) {
+		klog.Info("remove the job", klog.F("job", job.Name))
+	})
 	exe.AppendJobResultHook(func(task gron.Task, data interface{}, err error) {
-		log := klog.K("job", task.Job.Name).K("time", task.Prev).K("cost", task.Cost)
 		if err == nil {
-			log.Infof("run the job")
+			klog.Info("run the job", klog.F("job", task.Job.Name),
+				klog.F("time", task.Prev),
+				klog.F("cost", task.Cost))
 		} else {
-			log.E(err).Errorf("failed to run the job")
+			klog.Error("failed to run the job", klog.F("job", task.Job.Name),
+				klog.F("time", task.Prev), klog.F("cost", task.Cost), klog.E(err))
 		}
 	})
 	return workerHandler{timeout: timeout, executor: exe}
@@ -153,38 +174,38 @@ func (h workerHandler) AddJob(ctx *ship.Context) (err error) {
 	var callback func(gron.Task, interface{}, error)
 
 	if err = ctx.Bind(&task); err != nil {
-		return ctx.String(400, err.Error())
+		return ctx.Text(400, err.Error())
 	} else if task.Name == "" {
-		return ctx.String(400, "missing name")
+		return ctx.Text(400, "missing name")
 	} else if task.When == "" {
-		return ctx.String(400, "missing when")
+		return ctx.Text(400, "missing when")
 	} else if when, err = gron.ParseWhen(task.When); err != nil {
-		return ctx.String(400, err.Error())
+		return ctx.Text(400, err.Error())
 	} else if task.Callback != "" {
 		if _, err := url.Parse(task.Callback); err != nil {
-			return ctx.String(400, "invalid callback: %s", err.Error())
+			return ctx.Text(400, "invalid callback: %s", err.Error())
 		}
 		callback = newHTTPJobResultFunc(task.Callback)
 	} else if task.Retry.Number < 0 {
-		return ctx.String(400, "the retry number must not be negative")
+		return ctx.Text(400, "the retry number must not be negative")
 	}
 
 	if task.Runner == "" {
-		return ctx.String(400, "missing runner")
+		return ctx.Text(400, "missing runner")
 	} else if strings.HasPrefix(task.Runner, "shell ") { // Shell Runner
 		if cmd := strings.TrimSpace(task.Runner[6:]); cmd != "" {
 			runner = newShellJobRunner(cmd)
 		} else {
-			return ctx.String(400, "invalid shell runner")
+			return ctx.Text(400, "invalid shell runner")
 		}
 	} else if strings.HasPrefix(task.Runner, "bin ") { // Binary Runner
 		if cmd := strings.TrimSpace(task.Runner[4:]); cmd != "" {
 			runner = newBinJobRunner(cmd)
 		} else {
-			return ctx.String(400, "invalid bin runner")
+			return ctx.Text(400, "invalid bin runner")
 		}
 	} else {
-		return ctx.String(400, "invalid runner")
+		return ctx.Text(400, "invalid runner")
 	}
 
 	if task.Timeout <= 0 && h.timeout > 0 {
@@ -208,7 +229,7 @@ func (h workerHandler) AddJob(ctx *ship.Context) (err error) {
 }
 
 func (h workerHandler) DeleteJob(ctx *ship.Context) error {
-	name := ctx.Param("name")
+	name := ctx.URLParam("name")
 	if _, ok := h.executor.CancelJob(name); !ok {
 		return ctx.NoContent(404)
 	}
@@ -217,7 +238,7 @@ func (h workerHandler) DeleteJob(ctx *ship.Context) error {
 }
 
 func (h workerHandler) GetJob(ctx *ship.Context) error {
-	name := ctx.Param("name")
+	name := ctx.URLParam("name")
 	if task, ok := h.executor.GetTask(name); ok {
 		return ctx.JSON(200, task)
 	}
@@ -239,7 +260,8 @@ func newHTTPJobScheduleFunc(url string) func(gron.Job) {
 		req.Header.Set("X-Gron-Action", "schedule")
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		if resp, err := http.DefaultClient.Do(req.WithContext(ctx)); err != nil {
-			klog.K("job", job.Name).K("url", url).E(err).Errorf("faild to send job schedule notice")
+			klog.Error("faild to send job schedule notice", klog.F("job", job.Name),
+				klog.F("url", url), klog.E(err))
 		} else {
 			resp.Body.Close()
 		}
@@ -256,7 +278,8 @@ func newHTTPJobCancelFunc(url string) func(gron.Job) {
 		req.Header.Set("X-Gron-Action", "cancel")
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		if resp, err := http.DefaultClient.Do(req.WithContext(ctx)); err != nil {
-			klog.K("job", job.Name).K("url", url).E(err).Errorf("faild to send job cancel notice")
+			klog.Error("faild to send job cancel notice", klog.F("job", job.Name),
+				klog.F("url", url), klog.E(err))
 		} else {
 			resp.Body.Close()
 		}
@@ -274,7 +297,8 @@ func newHTTPJobResultFunc(url string) func(gron.Task, interface{}, error) {
 		bs, _ := json.Marshal(result{Result: data, Error: err})
 		resp, err := http.Post(url, ship.MIMEApplicationJSONCharsetUTF8, bytes.NewBuffer(bs))
 		if err != nil {
-			klog.K("job", task.Job.Name).K("url", url).E(err).Errorf("faild to send job result")
+			klog.Error("faild to send job result", klog.F("job", task.Job.Name),
+				klog.F("url", url), klog.E(err))
 		} else {
 			resp.Body.Close()
 		}
