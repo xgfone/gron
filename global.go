@@ -23,7 +23,7 @@ func AppendJobCancelHook(hook func(Job)) {
 }
 
 // AppendJobResultHook is equal to DefaultExecutor.AppendJobResultHook(hook).
-func AppendJobResultHook(hook func(Task, []byte, error)) {
+func AppendJobResultHook(hook func(Task, interface{}, error)) {
 	DefaultExecutor.AppendJobResultHook(hook)
 }
 

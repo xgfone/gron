@@ -25,7 +25,7 @@ type JobBuilder struct {
 
 	retry    Retry
 	timeout  time.Duration
-	callback func(Task, []byte, error)
+	callback func(Task, interface{}, error)
 }
 
 // NewJob returns a new job builder.
@@ -67,7 +67,7 @@ func (jb JobBuilder) Timeout(timeout time.Duration) JobBuilder {
 }
 
 // Callback returns a new job builder with the callback function.
-func (jb JobBuilder) Callback(cb func(Task, []byte, error)) JobBuilder {
+func (jb JobBuilder) Callback(cb func(Task, interface{}, error)) JobBuilder {
 	if cb == nil {
 		panic("the job callback must not be nil")
 	}

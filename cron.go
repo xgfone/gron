@@ -35,7 +35,7 @@ func GetJobName(ctx context.Context) string {
 }
 
 // Runner is used to represent the runner of the job.
-type Runner func(context.Context) (data []byte, err error)
+type Runner func(context.Context) (data interface{}, err error)
 
 // When represents when a job is executed.
 type When interface {
@@ -62,7 +62,7 @@ type Job struct {
 	// optional
 	Retry    Retry
 	Timeout  time.Duration
-	Callback func(task Task, data []byte, err error)
+	Callback func(task Task, data interface{}, err error)
 }
 
 // MarshalJSON implements json.Marshaler.
@@ -118,7 +118,7 @@ type taskResult struct {
 	Prev time.Time
 	Next time.Time
 	Cost time.Duration
-	Data []byte
+	Data interface{}
 	Err  error
 }
 
@@ -149,7 +149,7 @@ type Executor struct {
 
 	addHooks    []func(Job)
 	deleteHooks []func(Job)
-	resultHooks []func(Task, []byte, error)
+	resultHooks []func(Task, interface{}, error)
 	middlewares []Middleware
 
 	adds    chan Job
@@ -180,7 +180,7 @@ func (exe *Executor) AddMiddleware(mws ...Middleware) {
 }
 
 // AppendJobResultHook appends the hook to handle the result of the job.
-func (exe *Executor) AppendJobResultHook(hooks ...func(Task, []byte, error)) {
+func (exe *Executor) AppendJobResultHook(hooks ...func(Task, interface{}, error)) {
 	for _, hook := range hooks {
 		if hook == nil {
 			panic("the hook must not be nil")
@@ -414,7 +414,7 @@ func (exe *Executor) runJob(job Job, prev, next time.Time) {
 	}
 }
 
-func (exe *Executor) retryToRunJob(ctx context.Context, job Job) (data []byte, err error) {
+func (exe *Executor) retryToRunJob(ctx context.Context, job Job) (data interface{}, err error) {
 	defer func() {
 		if e := recover(); e != nil {
 			err = fmt.Errorf("job '%s' panic: %v", job.Name, err)
@@ -437,7 +437,7 @@ func (exe *Executor) retryToRunJob(ctx context.Context, job Job) (data []byte, e
 }
 
 func (exe *Executor) watchJob() {
-	rcbs := make([]func(Task, []byte, error), 0, 64)
+	rcbs := make([]func(Task, interface{}, error), 0, 64)
 	jcbs := make([]func(Job), 0, 8)
 	for {
 		select {
@@ -486,7 +486,7 @@ func (exe *Executor) runJobHook(cb func(Job), job Job) {
 	cb(job)
 }
 
-func (exe *Executor) runJobCallback(cb func(Task, []byte, error), t Task, d []byte, e error) {
+func (exe *Executor) runJobCallback(cb func(Task, interface{}, error), t Task, d interface{}, e error) {
 	defer recover()
 	cb(t, d, e)
 }

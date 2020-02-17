@@ -17,6 +17,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -102,7 +103,7 @@ func newWorkerHandler(jobScheduleHooks, jobCancelHooks, jobResultHooks []string,
 		jobCacnels = append(jobCacnels, newHTTPJobCancelFunc(u))
 	}
 
-	var jobResults []func(gron.Task, []byte, error)
+	var jobResults []func(gron.Task, interface{}, error)
 	for _, u := range jobResultHooks {
 		if _, err := url.Parse(u); err != nil {
 			panic(err)
@@ -116,7 +117,7 @@ func newWorkerHandler(jobScheduleHooks, jobCancelHooks, jobResultHooks []string,
 
 	exe.AppendJobScheduleHook(func(job gron.Job) { klog.K("job", job.Name).Infof("add the job") })
 	exe.AppendJobCancelHook(func(job gron.Job) { klog.K("job", job.Name).Infof("remove the job") })
-	exe.AppendJobResultHook(func(task gron.Task, data []byte, err error) {
+	exe.AppendJobResultHook(func(task gron.Task, data interface{}, err error) {
 		log := klog.K("job", task.Job.Name).K("time", task.Prev).K("cost", task.Cost)
 		if err == nil {
 			log.Infof("run the job")
@@ -148,8 +149,8 @@ func (h workerHandler) AddJob(ctx *ship.Context) (err error) {
 
 	var task taskT
 	var when gron.When
-	var runner func(context.Context) ([]byte, error)
-	var callback func(gron.Task, []byte, error)
+	var runner func(context.Context) (interface{}, error)
+	var callback func(gron.Task, interface{}, error)
 
 	if err = ctx.Bind(&task); err != nil {
 		return ctx.String(400, err.Error())
@@ -263,13 +264,14 @@ func newHTTPJobCancelFunc(url string) func(gron.Job) {
 	}
 }
 
-func newHTTPJobResultFunc(url string) func(gron.Task, []byte, error) {
-	return func(task gron.Task, data []byte, err error) {
-		var _err interface{}
-		if err != nil {
-			_err = err.Error()
-		}
-		bs, _ := json.Marshal(map[string]interface{}{"data": string(data), "err": _err})
+type result struct {
+	Result interface{} `json:"result,omitempty"`
+	Error  error       `json:"err,omitempty"`
+}
+
+func newHTTPJobResultFunc(url string) func(gron.Task, interface{}, error) {
+	return func(task gron.Task, data interface{}, err error) {
+		bs, _ := json.Marshal(result{Result: data, Error: err})
 		resp, err := http.Post(url, ship.MIMEApplicationJSONCharsetUTF8, bytes.NewBuffer(bs))
 		if err != nil {
 			klog.K("job", task.Job.Name).K("url", url).E(err).Errorf("faild to send job result")
@@ -279,17 +281,17 @@ func newHTTPJobResultFunc(url string) func(gron.Task, []byte, error) {
 	}
 }
 
-func newShellJobRunner(cmd string) func(context.Context) ([]byte, error) {
+func newShellJobRunner(cmd string) func(context.Context) (interface{}, error) {
 	return newJobRunner(shellCMD, "-c", cmd)
 }
 
-func newBinJobRunner(cmd string) func(context.Context) ([]byte, error) {
+func newBinJobRunner(cmd string) func(context.Context) (interface{}, error) {
 	cmds := strings.Fields(cmd)
 	return newJobRunner(cmds[0], cmds[1:]...)
 }
 
-func newJobRunner(name string, args ...string) func(context.Context) ([]byte, error) {
-	return func(ctx context.Context) (data []byte, err error) {
+func newJobRunner(name string, args ...string) func(context.Context) (interface{}, error) {
+	return func(ctx context.Context) (data interface{}, err error) {
 		cmd := exec.CommandContext(ctx, name, args...)
 		var output bytes.Buffer
 		var errput bytes.Buffer
@@ -303,7 +305,7 @@ func newJobRunner(name string, args ...string) func(context.Context) ([]byte, er
 				err = errors.New(string(stdout))
 			}
 		} else {
-			data = output.Bytes()
+			data = base64.StdEncoding.EncodeToString(output.Bytes())
 		}
 
 		return
