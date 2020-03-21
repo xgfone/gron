@@ -84,6 +84,9 @@ func MustParseWhen(s string) When {
 //    0      12  */2 * *  run at noon on every two days
 //    1-59/2 *   *   * *  run every two minutes, but on odd minutes
 //
+// Notice: for the crontab format, you can use the sub-package
+// github.com/xgfone/gron/crontab, which is ported from github.com/robfig/cron.
+//
 func ParseWhen(s string) (When, error) {
 	if s = strings.TrimSpace(s); len(s) < 2 {
 		return nil, fmt.Errorf("When: missing directive")
