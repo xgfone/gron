@@ -26,13 +26,14 @@ import "time"
 
 // SpecSchedule specifies a duty cycle (to the second granularity), based on a
 // traditional crontab specification. It is computed initially and stored as bit sets.
-type specSchedule struct {
+type SpecSchedule struct {
 	Second, Minute, Hour, Dom, Month, Dow uint64
 
 	// Override location for this schedule.
 	Location *time.Location
 
-	spec string
+	// Spec is the string representation. Optional.
+	Spec string
 }
 
 // bounds provides a range of acceptable values (plus a map of name to value).
@@ -77,11 +78,11 @@ const (
 	starBit = 1 << 63
 )
 
-func (s *specSchedule) String() string { return s.spec }
+func (s *SpecSchedule) String() string { return s.Spec }
 
 // Next returns the next time this schedule is activated, greater than the given
 // time.  If no time can be found to satisfy the schedule, return the zero time.
-func (s *specSchedule) Next(t time.Time) time.Time {
+func (s *SpecSchedule) Next(t time.Time) time.Time {
 	// General approach
 	//
 	// For Month, Day, Hour, Minute, Second:
@@ -202,7 +203,7 @@ WRAP:
 
 // dayMatches returns true if the schedule's day-of-week and day-of-month
 // restrictions are satisfied by the given time.
-func dayMatches(s *specSchedule, t time.Time) bool {
+func dayMatches(s *SpecSchedule, t time.Time) bool {
 	var (
 		domMatch bool = 1<<uint(t.Day())&s.Dom > 0
 		dowMatch bool = 1<<uint(t.Weekday())&s.Dow > 0

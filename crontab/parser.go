@@ -28,8 +28,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/xgfone/gron"
 )
 
 // ParseOption is the configuration option to create a parser.
@@ -111,7 +109,7 @@ func NewParser(options ParseOption) Parser {
 // Parse returns a new crontab schedule representing the given spec.
 // It returns a descriptive error if the spec is not valid.
 // It accepts crontab specs and features configured by NewParser.
-func (p Parser) Parse(spec string) (gron.When, error) {
+func (p Parser) Parse(spec string) (*SpecSchedule, error) {
 	spec = strings.TrimSpace(spec)
 	origSpec := spec
 	if len(spec) == 0 {
@@ -169,7 +167,7 @@ func (p Parser) Parse(spec string) (gron.When, error) {
 		return nil, err
 	}
 
-	return &specSchedule{
+	return &SpecSchedule{
 		Second:   second,
 		Minute:   minute,
 		Hour:     hour,
@@ -177,7 +175,7 @@ func (p Parser) Parse(spec string) (gron.When, error) {
 		Month:    month,
 		Dow:      dayofweek,
 		Location: loc,
-		spec:     origSpec,
+		Spec:     origSpec,
 	}, nil
 }
 
@@ -256,7 +254,7 @@ var StandardParser = NewParser(
 // It accepts
 //   - Standard crontab specs, e.g. "* * * * ?"
 //   - Descriptors, e.g. "@midnight", "@every 1h30m"
-func ParseStandard(standardSpec string) (gron.When, error) {
+func ParseStandard(standardSpec string) (*SpecSchedule, error) {
 	return StandardParser.Parse(standardSpec)
 }
 
@@ -392,10 +390,10 @@ func all(r bounds) uint64 {
 }
 
 // parseDescriptor returns a predefined schedule for the expression, or error if none matches.
-func parseDescriptor(origSpec, descriptor string, loc *time.Location) (gron.When, error) {
+func parseDescriptor(origSpec, descriptor string, loc *time.Location) (*SpecSchedule, error) {
 	switch descriptor {
 	case "@yearly", "@annually":
-		return &specSchedule{
+		return &SpecSchedule{
 			Second:   1 << seconds.min,
 			Minute:   1 << minutes.min,
 			Hour:     1 << hours.min,
@@ -403,11 +401,11 @@ func parseDescriptor(origSpec, descriptor string, loc *time.Location) (gron.When
 			Month:    1 << months.min,
 			Dow:      all(dow),
 			Location: loc,
-			spec:     origSpec,
+			Spec:     origSpec,
 		}, nil
 
 	case "@monthly":
-		return &specSchedule{
+		return &SpecSchedule{
 			Second:   1 << seconds.min,
 			Minute:   1 << minutes.min,
 			Hour:     1 << hours.min,
@@ -415,11 +413,11 @@ func parseDescriptor(origSpec, descriptor string, loc *time.Location) (gron.When
 			Month:    all(months),
 			Dow:      all(dow),
 			Location: loc,
-			spec:     origSpec,
+			Spec:     origSpec,
 		}, nil
 
 	case "@weekly":
-		return &specSchedule{
+		return &SpecSchedule{
 			Second:   1 << seconds.min,
 			Minute:   1 << minutes.min,
 			Hour:     1 << hours.min,
@@ -427,11 +425,11 @@ func parseDescriptor(origSpec, descriptor string, loc *time.Location) (gron.When
 			Month:    all(months),
 			Dow:      1 << dow.min,
 			Location: loc,
-			spec:     origSpec,
+			Spec:     origSpec,
 		}, nil
 
 	case "@daily", "@midnight":
-		return &specSchedule{
+		return &SpecSchedule{
 			Second:   1 << seconds.min,
 			Minute:   1 << minutes.min,
 			Hour:     1 << hours.min,
@@ -439,11 +437,11 @@ func parseDescriptor(origSpec, descriptor string, loc *time.Location) (gron.When
 			Month:    all(months),
 			Dow:      all(dow),
 			Location: loc,
-			spec:     origSpec,
+			Spec:     origSpec,
 		}, nil
 
 	case "@hourly":
-		return &specSchedule{
+		return &SpecSchedule{
 			Second:   1 << seconds.min,
 			Minute:   1 << minutes.min,
 			Hour:     all(hours),
@@ -451,7 +449,7 @@ func parseDescriptor(origSpec, descriptor string, loc *time.Location) (gron.When
 			Month:    all(months),
 			Dow:      all(dow),
 			Location: loc,
-			spec:     origSpec,
+			Spec:     origSpec,
 		}, nil
 
 	default:

@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/xgfone/gron/crontab"
 )
 
 // Every is equal to ParseWhen("@every d").
@@ -48,44 +50,7 @@ func MustParseWhen(s string) When {
 //   @end   RFC3339  // When the deadline is reached, the job will end.
 //   @total int(>0)  // When the job is run for total times, it will end.
 //   @once           // It is equal to "@total 1".
-//   @at    crontab  // Crontab format, which has not been implemented yet.
-//
-// Here are the few quick references about crontab simple but powerful syntax.
-//
-//    *     *     *     *     *
-//
-//    ^     ^     ^     ^     ^
-//    |     |     |     |     |
-//    |     |     |     |     +----- day of week (0-6) (Sunday=0)
-//    |     |     |     +------- month (1-12)
-//    |     |     +--------- day of month (1-31)
-//    |     +----------- hour (0-23)
-//    +------------- min (0-59)
-//
-// Examples
-//
-//   *  *  * * *  run on every minute
-//   10 *  * * *  run at 0:10, 1:10 etc
-//   10 15 * * *  run at 15:10 every day
-//   *  *  1 * *  run on every minute on 1st day of month
-//   0  0  1 1 *  Happy new year schedule
-//   0  0  * * 1  Run at midnight on every Monday
-//
-// Lists
-//
-//   1-15 *        * * *  run at 1, 2, 3...15 minute of each hour
-//   0    0-5,10   * * *  run on every hour from 0-5 and in 10 oclock
-//   *    10,15,19 * * *  run at 10:00, 15:00 and 19:00
-//
-// Steps
-//
-//    */2    *   *   * *  run every two minutes
-//    10     */3 *   * *  run every 3 hours on 10th min
-//    0      12  */2 * *  run at noon on every two days
-//    1-59/2 *   *   * *  run every two minutes, but on odd minutes
-//
-// Notice: for the crontab format, you can use the sub-package
-// github.com/xgfone/gron/crontab, which is ported from github.com/robfig/cron.
+//   @at    crontab  // Crontab format, which is implemented by the sub-package crontab.
 //
 func ParseWhen(s string) (When, error) {
 	if s = strings.TrimSpace(s); len(s) < 2 {
@@ -159,7 +124,9 @@ func ParseWhen(s string) (When, error) {
 			}
 			delay = d
 
-		// case "at": // for cron format
+		case "at": // for cron format
+			return crontab.StandardParser.Parse(arg)
+
 		// case "yearly":
 		// case "monthly":
 		// case "weekly":

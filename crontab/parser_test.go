@@ -141,7 +141,7 @@ func TestParseSchedule(t *testing.T) {
 	entries := []struct {
 		parser   Parser
 		expr     string
-		expected *specSchedule
+		expected *SpecSchedule
 	}{
 		{secondParser, "0 5 * * * *", every5min(time.Local)},
 		{StandardParser, "5 * * * *", every5min(time.Local)},
@@ -156,7 +156,7 @@ func TestParseSchedule(t *testing.T) {
 		{
 			parser: secondParser,
 			expr:   "* 5 * * * *",
-			expected: &specSchedule{
+			expected: &SpecSchedule{
 				Second:   all(seconds),
 				Minute:   1 << 5,
 				Hour:     all(hours),
@@ -169,7 +169,7 @@ func TestParseSchedule(t *testing.T) {
 	}
 
 	for _, c := range entries {
-		c.expected.spec = c.expr
+		c.expected.Spec = c.expr
 		actual, err := c.parser.Parse(c.expr)
 		if err != nil {
 			t.Errorf("%s => unexpected error %v", c.expr, err)
@@ -184,7 +184,7 @@ func TestOptionalSecondSchedule(t *testing.T) {
 	parser := NewParser(SecondOptional | Minute | Hour | Dom | Month | Dow | Descriptor)
 	entries := []struct {
 		expr     string
-		expected *specSchedule
+		expected *SpecSchedule
 	}{
 		{"0 5 * * * *", every5min(time.Local)},
 		{"5 5 * * * *", every5min5s(time.Local)},
@@ -192,7 +192,7 @@ func TestOptionalSecondSchedule(t *testing.T) {
 	}
 
 	for _, c := range entries {
-		c.expected.spec = c.expr
+		c.expected.Spec = c.expr
 		actual, err := parser.Parse(c.expr)
 		if err != nil {
 			t.Errorf("%s => unexpected error %v", c.expr, err)
@@ -315,12 +315,12 @@ func TestNormalizeFields_Errors(t *testing.T) {
 func TestStandardSpecSchedule(t *testing.T) {
 	entries := []struct {
 		expr     string
-		expected *specSchedule
+		expected *SpecSchedule
 		err      string
 	}{
 		{
 			expr:     "5 * * * *",
-			expected: &specSchedule{1 << seconds.min, 1 << 5, all(hours), all(dom), all(months), all(dow), time.Local, ""},
+			expected: &SpecSchedule{1 << seconds.min, 1 << 5, all(hours), all(dom), all(months), all(dow), time.Local, ""},
 		},
 		{
 			expr: "5 j * * *",
@@ -334,7 +334,7 @@ func TestStandardSpecSchedule(t *testing.T) {
 
 	for _, c := range entries {
 		if c.expected != nil {
-			c.expected.spec = c.expr
+			c.expected.Spec = c.expr
 		}
 
 		actual, err := ParseStandard(c.expr)
@@ -344,31 +344,26 @@ func TestStandardSpecSchedule(t *testing.T) {
 		if len(c.err) == 0 && err != nil {
 			t.Errorf("%s => unexpected error %v", c.expr, err)
 		}
-
-		if actual == nil {
-			if c.expected != nil {
-				t.Errorf("%s => expected %#v, got %#v", c.expr, c.expected, actual)
-			}
-		} else if !reflect.DeepEqual(actual.(*specSchedule), c.expected) {
+		if !reflect.DeepEqual(actual, c.expected) {
 			t.Errorf("%s => expected %#v, got %#v", c.expr, c.expected, actual)
 		}
 	}
 }
 
-func every5min(loc *time.Location) *specSchedule {
-	return &specSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), all(dow), loc, ""}
+func every5min(loc *time.Location) *SpecSchedule {
+	return &SpecSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), all(dow), loc, ""}
 }
 
-func every5min5s(loc *time.Location) *specSchedule {
-	return &specSchedule{1 << 5, 1 << 5, all(hours), all(dom), all(months), all(dow), loc, ""}
+func every5min5s(loc *time.Location) *SpecSchedule {
+	return &SpecSchedule{1 << 5, 1 << 5, all(hours), all(dom), all(months), all(dow), loc, ""}
 }
 
-func midnight(loc *time.Location) *specSchedule {
-	return &specSchedule{1, 1, 1, all(dom), all(months), all(dow), loc, ""}
+func midnight(loc *time.Location) *SpecSchedule {
+	return &SpecSchedule{1, 1, 1, all(dom), all(months), all(dow), loc, ""}
 }
 
-func annual(loc *time.Location) *specSchedule {
-	return &specSchedule{
+func annual(loc *time.Location) *SpecSchedule {
+	return &SpecSchedule{
 		Second:   1 << seconds.min,
 		Minute:   1 << minutes.min,
 		Hour:     1 << hours.min,
