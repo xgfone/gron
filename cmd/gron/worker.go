@@ -26,9 +26,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/urfave/cli"
-	"github.com/xgfone/gconf/v4"
-	"github.com/xgfone/go-tools/v6/lifecycle"
+	"github.com/urfave/cli/v2"
+	"github.com/xgfone/gconf/v5"
+	"github.com/xgfone/go-tools/v7/lifecycle"
 	"github.com/xgfone/gron"
 	"github.com/xgfone/klog/v3"
 	"github.com/xgfone/ship/v2"
@@ -48,7 +48,7 @@ var workerOpts = []gconf.Opt{
 }
 
 func init() {
-	gconf.NewGroup("worker").RegisterOpts(workerOpts)
+	gconf.NewGroup("worker").RegisterOpts(workerOpts...)
 }
 
 func initLogging(level, filepath string) error {
@@ -66,10 +66,10 @@ func initLogging(level, filepath string) error {
 	return nil
 }
 
-func getWorkerCommand() cli.Command {
+func getWorkerCommand() *cli.Command {
 	conf := gconf.Group("worker")
 
-	return cli.Command{
+	return &cli.Command{
 		Name:  "worker",
 		Usage: "An gron runner worker like crontab, but more powerful",
 		Flags: gconf.ConvertOptsToCliFlags(conf),

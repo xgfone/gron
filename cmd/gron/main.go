@@ -17,8 +17,8 @@ package main
 import (
 	"os"
 
-	"github.com/urfave/cli"
-	"github.com/xgfone/go-tools/v6/lifecycle"
+	"github.com/urfave/cli/v2"
+	"github.com/xgfone/go-tools/v7/lifecycle"
 	"github.com/xgfone/klog/v3"
 )
 
@@ -26,7 +26,7 @@ func main() {
 	app := cli.NewApp()
 	app.Version = version
 	app.Usage = "A crontab service"
-	app.Commands = []cli.Command{getWorkerCommand()}
+	app.Commands = []*cli.Command{getWorkerCommand()}
 	if err := app.Run(os.Args); err != nil {
 		klog.Ef(err, "The program exits.")
 	}
