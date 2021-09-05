@@ -1,4 +1,4 @@
-# gron [![Build Status](https://travis-ci.org/xgfone/gron.svg?branch=master)](https://travis-ci.org/xgfone/gron) [![GoDoc](https://godoc.org/github.com/xgfone/gron?status.svg)](http://godoc.org/github.com/xgfone/gron) [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square)](https://raw.githubusercontent.com/xgfone/gron/master/LICENSE)
+# gron [![Build Status](https://github.com/xgfone/gron/actions/workflows/go.yml/badge.svg)](https://github.com/xgfone/gron/actions/workflows/go.yml) [![GoDoc](https://godoc.org/github.com/xgfone/gron?status.svg)](http://godoc.org/github.com/xgfone/gron) [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square)](https://raw.githubusercontent.com/xgfone/gron/master/LICENSE)
 
 Another job periodic runner like `crontab`. See [GoDoc](https://godoc.org/github.com/xgfone/gron).
 
