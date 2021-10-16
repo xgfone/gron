@@ -57,20 +57,22 @@ type JobResult struct {
 // Task represents a job task.
 type Task struct {
 	Job       Job
-	Prev      time.Time // the last time to be executed
-	Next      time.Time // the next time to be executed
-	IsRunning bool      // Indicate whether the job is running
+	Prev      time.Time     // The last time to be executed
+	Next      time.Time     // The next time to be executed
+	Cost      time.Duration // The cost duration to execute the job last time
+	IsRunning bool          // Indicate whether the job is running
 }
 
 type task struct {
 	Job     Job
 	Prev    time.Time
 	Next    time.Time
+	Cost    int64
 	Running uint32
 }
 
-func (t *task) IsRunning() bool { return atomic.LoadUint32(&t.Running) == 1 }
-
+func (t *task) IsRunning() bool    { return atomic.LoadUint32(&t.Running) == 1 }
+func (t *task) SetCost(cost int64) { atomic.StoreInt64(&t.Cost, cost) }
 func (t *task) SetRunning(running bool) {
 	if running {
 		atomic.StoreUint32(&t.Running, 1)
@@ -84,6 +86,7 @@ func (t *task) Task() Task {
 		Job:       t.Job,
 		Prev:      t.Prev,
 		Next:      t.Next,
+		Cost:      time.Duration(atomic.LoadInt64(&t.Cost)),
 		IsRunning: t.IsRunning(),
 	}
 }
@@ -263,8 +266,9 @@ func (e *Executor) loop() {
 				}
 
 				ok = true
-				task.Next = next
+				task.Cost = 0
 				task.Prev = now
+				task.Next = next
 				task.SetRunning(true)
 				go e.runTask(task, now, next, e.timeo)
 			}
@@ -285,13 +289,15 @@ func (e *Executor) loop() {
 func (e *Executor) runTask(task *task, now, next time.Time, timeout time.Duration) {
 	defer task.SetRunning(false)
 	result, err := e.runJob(task.Job, now, timeout)
+	cost := time.Since(now)
+	task.SetCost(int64(cost))
 
 	if len(e.hooks) > 0 {
 		jobResult := JobResult{
 			Job:    task.Job,
 			Next:   next,
 			Start:  now,
-			Cost:   time.Since(now),
+			Cost:   cost,
 			Result: result,
 			Error:  err,
 		}
