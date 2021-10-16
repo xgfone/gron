@@ -1,4 +1,4 @@
-// Copyright 2019 xgfone
+// Copyright 2021 xgfone
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,478 +15,308 @@
 package gron
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
-
-type contextType struct{}
-
-var ctxJobName = contextType{}
-
-// GetJobName returns the job name from the context, which is used by the runner
-// in general.
-func GetJobName(ctx context.Context) string {
-	name, _ := ctx.Value(ctxJobName).(string)
-	return name
-}
-
-// Runner is used to represent the runner of the job.
-type Runner func(context.Context) (data interface{}, err error)
 
 // When represents when a job is executed.
 type When interface {
 	// String returns the string representation.
 	String() string
 
-	// Next returns the next time when the job is executed.
+	// Next returns the next UTC time when the job is executed.
+	//
+	// If prev is ZERO, it indicates that it's the first time.
 	Next(prev time.Time) (next time.Time)
 }
 
-// Retry represents a retry policy.
-type Retry struct {
-	Number   int
-	Interval time.Duration
-}
-
 // Job represents a task job.
-type Job struct {
-	// Required
-	Name string
-	When When
-	Run  Runner
-
-	// optional
-	Retry    Retry
-	Timeout  time.Duration
-	Callback func(task Task, data interface{}, err error)
+type Job interface {
+	Name() string
+	When() When
+	Run(c context.Context, now time.Time) (result interface{}, err error)
 }
 
-// MarshalJSON implements json.Marshaler.
-func (j Job) MarshalJSON() ([]byte, error) {
-	buf := bytes.NewBuffer(nil)
-	buf.Grow(128)
-	buf.WriteByte('{')
-	fmt.Fprintf(buf, `"name":"%s",`, j.Name)
-	fmt.Fprintf(buf, `"when":"%s",`, j.When.String())
-	fmt.Fprintf(buf, `"timeout":"%s",`, j.Timeout.String())
+// JobResultHook is the hook to handle the result of the job task.
+type JobResultHook func(JobResult)
 
-	buf.WriteString(`"retry":{`)
-	fmt.Fprintf(buf, `"number":%d,`, j.Retry.Number)
-	fmt.Fprintf(buf, `"interval":"%s"`, j.Retry.Interval)
-	buf.WriteString("}}")
-	return buf.Bytes(), nil
+// JobResult is the result of the job.
+type JobResult struct {
+	Job    Job
+	Next   time.Time
+	Start  time.Time
+	Cost   time.Duration
+	Result interface{}
+	Error  error
 }
 
 // Task represents a job task.
 type Task struct {
-	Job  Job
-	Prev time.Time     // the last time to be executed
-	Next time.Time     // the next time to be executed
-	Cost time.Duration // The time cost to execute the job last
-
-	Running bool // Indicate the job is running
+	Job       Job
+	Prev      time.Time // the last time to be executed
+	Next      time.Time // the next time to be executed
+	IsRunning bool      // Indicate whether the job is running
 }
 
-// MarshalJSON implements json.Marshaler.
-func (t Task) MarshalJSON() ([]byte, error) {
-	buf := bytes.NewBuffer(nil)
-	buf.Grow(256)
-	buf.WriteByte('{')
-	fmt.Fprintf(buf, `"prev":"%s",`, t.Prev.Format(time.RFC3339))
-	fmt.Fprintf(buf, `"next":"%s",`, t.Next.Format(time.RFC3339))
-	fmt.Fprintf(buf, `"cost":"%s",`, t.Cost.String())
-	fmt.Fprintf(buf, `"running":%t,`, t.Running)
-
-	buf.WriteString(`"job":{`)
-	fmt.Fprintf(buf, `"name":"%s",`, t.Job.Name)
-	fmt.Fprintf(buf, `"when":"%s",`, t.Job.When.String())
-	fmt.Fprintf(buf, `"timeout":"%s",`, t.Job.Timeout.String())
-
-	buf.WriteString(`"retry":{`)
-	fmt.Fprintf(buf, `"number":%d,`, t.Job.Retry.Number)
-	fmt.Fprintf(buf, `"interval":"%s"`, t.Job.Retry.Interval)
-	buf.WriteString("}}}")
-	return buf.Bytes(), nil
+type task struct {
+	Job     Job
+	Prev    time.Time
+	Next    time.Time
+	Running uint32
 }
 
-type taskResult struct {
-	Job  Job
-	Prev time.Time
-	Next time.Time
-	Cost time.Duration
-	Data interface{}
-	Err  error
+func (t *task) IsRunning() bool { return atomic.LoadUint32(&t.Running) == 1 }
+
+func (t *task) SetRunning(running bool) {
+	if running {
+		atomic.StoreUint32(&t.Running, 1)
+	} else {
+		atomic.StoreUint32(&t.Running, 0)
+	}
 }
 
-type jobTasks []Task
-
-func (ts jobTasks) Len() int {
-	return len(ts)
+func (t *task) Task() Task {
+	return Task{
+		Job:       t.Job,
+		Prev:      t.Prev,
+		Next:      t.Next,
+		IsRunning: t.IsRunning(),
+	}
 }
 
-func (ts jobTasks) Less(i, j int) bool {
-	return ts[j].Next.After(ts[i].Next)
-}
+type tasks []*task
 
-func (ts jobTasks) Swap(i, j int) {
-	t := ts[i]
-	ts[i] = ts[j]
-	ts[j] = t
-}
-
-// Middleware is used to return a new job based on the old one.
-type Middleware func(Job) Job
+func (ts tasks) Len() int           { return len(ts) }
+func (ts tasks) Less(i, j int) bool { return ts[j].Next.After(ts[i].Next) }
+func (ts tasks) Swap(i, j int)      { t := ts[i]; ts[i] = ts[j]; ts[j] = t }
 
 // Executor represents a task executor.
 type Executor struct {
-	lock  *sync.RWMutex
+	exit  chan struct{}
 	stop  chan struct{}
-	tasks []Task
+	hooks []JobResultHook
 
-	addHooks    []func(Job)
-	deleteHooks []func(Job)
-	resultHooks []func(Task, interface{}, error)
-	middlewares []Middleware
-
-	adds    chan Job
-	deletes chan Job
-	results chan taskResult
+	lock  sync.RWMutex
+	timeo time.Duration
+	tasks tasks
 }
 
 // NewExecutor returns a new job executor.
 func NewExecutor() *Executor {
-	exe := &Executor{
-		lock:    new(sync.RWMutex),
-		stop:    make(chan struct{}, 1),
-		tasks:   make([]Task, 0, 64),
-		adds:    make(chan Job, 128),
-		deletes: make(chan Job, 128),
-		results: make(chan taskResult, 1024),
+	return &Executor{
+		exit:  make(chan struct{}),
+		stop:  make(chan struct{}),
+		tasks: make([]*task, 0, 64),
 	}
-
-	go exe.loop()
-	go exe.watchJob()
-
-	return exe
 }
 
-// AddMiddleware adds the some middlewares.
-func (exe *Executor) AddMiddleware(mws ...Middleware) {
-	exe.middlewares = append(exe.middlewares, mws...)
+// SetTimeout resets the timeout of all the jobs to execute the job.
+func (e *Executor) SetTimeout(timeout time.Duration) {
+	e.lock.Lock()
+	e.timeo = timeout
+	e.lock.Unlock()
 }
 
-// AppendJobResultHook appends the hook to handle the result of the job.
-func (exe *Executor) AppendJobResultHook(hooks ...func(Task, interface{}, error)) {
-	for _, hook := range hooks {
-		if hook == nil {
-			panic("the hook must not be nil")
-		}
-	}
-
-	exe.lock.Lock()
-	exe.resultHooks = append(exe.resultHooks, hooks...)
-	exe.lock.Unlock()
+// AppendResultHooks appends the some result hooks.
+func (e *Executor) AppendResultHooks(hooks ...JobResultHook) {
+	e.hooks = append(e.hooks, hooks...)
 }
 
-// AppendJobScheduleHook appends the hook to watch which job is scheduled.
-func (exe *Executor) AppendJobScheduleHook(hooks ...func(Job)) {
-	for _, hook := range hooks {
-		if hook == nil {
-			panic("the hook must not be nil")
-		}
-	}
-
-	exe.lock.Lock()
-	exe.addHooks = append(exe.addHooks, hooks...)
-	exe.lock.Unlock()
+// Schedule is equal to e.ScheduleJob(NewJob(name, when, runner)).
+func (e *Executor) Schedule(name string, when When, runner Runner) error {
+	return e.ScheduleJob(NewJob(name, when, runner))
 }
 
-// AppendJobCancelHook appends the hook to watch which job is canceled.
-func (exe *Executor) AppendJobCancelHook(hooks ...func(Job)) {
-	for _, hook := range hooks {
-		if hook == nil {
-			panic("the hook must not be nil")
-		}
-	}
-	exe.lock.Lock()
-	exe.deleteHooks = append(exe.deleteHooks, hooks...)
-	exe.lock.Unlock()
-}
+// ScheduleJob adds a job to wait to be scheduled.
+func (e *Executor) ScheduleJob(job Job) (err error) {
+	name := job.Name()
+	next := job.When().Next(time.Time{}).UTC()
 
-// Schedule is equal to
-//   ScheduleJob(Job{Name: name, When: when, Run: run})
-func (exe *Executor) Schedule(name string, when When, run Runner) (ok bool) {
-	return exe.ScheduleJob(Job{Name: name, When: when, Run: run})
-}
-
-// ScheduleJob adds a job and returns true, but it will do nothing and return
-// false if the job name has existed.
-//
-// Notice:
-//   1. the job won't be run immediately until the next clock tick comes.
-//      And a clock tick is one second, so the interval duration to run the job
-//      periodically must not be less than one second.
-//   2. If the next time to run the job reaches, but the last job has been
-//      running, it will wait the next clock tick to be run.
-func (exe *Executor) ScheduleJob(job Job) (ok bool) {
-	if job.Name == "" {
-		panic("the job name must not be empty")
-	} else if job.When == nil {
-		panic("the job when must not be nil")
-	} else if job.Run == nil {
-		panic("the job runner must not be nil")
-	} else if job.Retry.Number < 0 {
-		panic("the job return number must not be negative")
-	}
-
-	next := job.When.Next(time.Time{})
-	if next.IsZero() {
-		return false
-	}
-
-	exe.lock.Lock()
-	for i := range exe.tasks {
-		if exe.tasks[i].Job.Name == job.Name {
+	var ok bool
+	e.lock.Lock()
+	for _len := len(e.tasks) - 1; _len >= 0; _len-- {
+		if e.tasks[_len].Job.Name() == name {
 			ok = true
 			break
 		}
 	}
 	if !ok {
-		exe.tasks = append(exe.tasks, Task{Job: job, Next: next})
-		sort.Sort(jobTasks(exe.tasks))
+		e.tasks = append(e.tasks, &task{Job: job, Next: next})
+		sort.Sort(e.tasks)
 	}
-	exe.lock.Unlock()
-
-	if !ok {
-		exe.adds <- job
-	}
-	return !ok
-}
-
-// CancelJob cancels the job task by its name.
-func (exe *Executor) CancelJob(name string) (task Task, ok bool) {
-	exe.lock.Lock()
-	task, ok = exe.cancelJob(name)
-	exe.lock.Unlock()
-	return
-}
-
-func (exe *Executor) cancelJob(name string) (task Task, ok bool) {
-	for i := range exe.tasks {
-		if exe.tasks[i].Job.Name == name {
-			ok = true
-			task = exe.tasks[i]
-
-			_len := len(exe.tasks) - 1
-			copy(exe.tasks[i:_len], exe.tasks[i+1:])
-			exe.tasks = exe.tasks[:_len]
-
-			break
-		}
-	}
+	e.lock.Unlock()
 
 	if ok {
-		exe.deletes <- task.Job
+		err = fmt.Errorf("the job named '%s' has been added", name)
+	}
+
+	return
+}
+
+// CancelJobs cancels the jobs by the given names.
+func (e *Executor) CancelJobs(names ...string) {
+	if len(names) > 0 {
+		e.lock.Lock()
+		e.cancelJobs(names...)
+		e.lock.Unlock()
 	}
 	return
 }
 
-// GetTask returns the job task by its name.
-func (exe *Executor) GetTask(name string) (task Task, ok bool) {
-	exe.lock.Lock()
-	for i := range exe.tasks {
-		if exe.tasks[i].Job.Name == name {
+func (e *Executor) cancelJobs(names ...string) {
+	for i := len(e.tasks) - 1; i >= 0; i-- {
+		if inStrings(e.tasks[i].Job.Name(), names) {
+			_len := len(e.tasks)
+			copy(e.tasks[i:_len], e.tasks[i+1:_len])
+			e.tasks = e.tasks[:_len-1]
+		}
+	}
+	return
+}
+
+func inStrings(s string, ss []string) bool {
+	for _, _s := range ss {
+		if _s == s {
+			return true
+		}
+	}
+	return false
+}
+
+// GetTask returns the job task by the name.
+func (e *Executor) GetTask(name string) (task Task, ok bool) {
+	e.lock.RLock()
+	for i := len(e.tasks) - 1; i >= 0; i-- {
+		if e.tasks[i].Job.Name() == name {
+			task = e.tasks[i].Task()
 			ok = true
-			task = exe.tasks[i]
 			break
 		}
 	}
-	exe.lock.Unlock()
+	e.lock.RUnlock()
 	return
 }
 
 // GetAllTasks returns the tasks of all the jobs.
-func (exe *Executor) GetAllTasks() []Task {
-	exe.lock.RLock()
-	tasks := append([]Task(nil), exe.tasks...)
-	exe.lock.RUnlock()
-	return tasks
-}
-
-// Wait waits until all the jobs end.
-func (exe *Executor) Wait() {
-	for {
-		exe.lock.RLock()
-		n := len(exe.tasks)
-		exe.lock.RUnlock()
-		if n == 0 {
-			break
-		}
-		time.Sleep(time.Second)
+func (e *Executor) GetAllTasks() (tasks []Task) {
+	e.lock.RLock()
+	_len := len(e.tasks)
+	tasks = make([]Task, _len)
+	for _len--; _len >= 0; _len-- {
+		tasks[_len] = e.tasks[_len].Task()
 	}
+	e.lock.RUnlock()
+	return
 }
 
-// Close stops all the jobs in the executor.
-func (exe *Executor) Close() {
+// Wait waits until the executor is stopped.
+func (e *Executor) Wait() { <-e.exit }
+
+// Run starts the executor in the current goroutine, which does not return
+// until the executor is stopped.
+func (e *Executor) Run() { e.loop() }
+
+// Start starts the executor in the background goroutine.
+func (e *Executor) Start() { go e.loop() }
+
+// Stop stops all the jobs in the executor.
+func (e *Executor) Stop() {
 	select {
-	case <-exe.stop:
+	case <-e.stop:
 	default:
-		close(exe.stop)
+		close(e.stop)
 	}
 }
 
-func (exe *Executor) loop() {
+func (e *Executor) loop() {
 	names := make([]string, 0, 8)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-exe.stop:
+		case <-e.stop:
+			close(e.exit)
 			return
+
 		case now := <-ticker.C:
+			now = now.UTC()
 			var ok bool
-			exe.lock.RLock()
-			for i, task := range exe.tasks {
+			e.lock.Lock()
+			for _, task := range e.tasks {
 				if task.Next.After(now) {
 					break
-				} else if !task.Running {
-					ok = true
-					next := task.Job.When.Next(task.Next)
-					if next.IsZero() {
-						names = append(names, task.Job.Name)
-					} else {
-						exe.tasks[i].Running = true
-						exe.tasks[i].Prev = now
-						exe.tasks[i].Next = next
-					}
-					go exe.runJob(task.Job, now, next)
 				}
+
+				if task.IsRunning() {
+					continue
+				}
+
+				next := task.Job.When().Next(now).UTC()
+				if next.IsZero() {
+					names = append(names, task.Job.Name())
+					continue
+				}
+
+				ok = true
+				task.Next = next
+				task.Prev = now
+				task.SetRunning(true)
+				go e.runTask(task, now, next, e.timeo)
 			}
 
 			if len(names) > 0 {
-				for _, name := range names {
-					exe.cancelJob(name)
-				}
+				e.cancelJobs(names...)
 				names = names[:0]
 			}
 
 			if ok {
-				sort.Sort(jobTasks(exe.tasks))
+				sort.Sort(e.tasks)
 			}
-			exe.lock.RUnlock()
+			e.lock.Unlock()
 		}
 	}
 }
 
-func (exe *Executor) setTaskStatus(name string, running bool) {
-	exe.lock.Lock()
-	for i := range exe.tasks {
-		if exe.tasks[i].Job.Name == name {
-			exe.tasks[i].Running = running
-			break
+func (e *Executor) runTask(task *task, now, next time.Time, timeout time.Duration) {
+	defer task.SetRunning(false)
+	result, err := e.runJob(task.Job, now, timeout)
+
+	if len(e.hooks) > 0 {
+		jobResult := JobResult{
+			Job:    task.Job,
+			Next:   next,
+			Start:  now,
+			Cost:   time.Since(now),
+			Result: result,
+			Error:  err,
+		}
+
+		for _, hook := range e.hooks {
+			hook(jobResult)
 		}
 	}
-	exe.lock.Unlock()
 }
 
-func (exe *Executor) runJob(job Job, prev, next time.Time) {
-	var cancel func()
-	ctx := context.WithValue(context.Background(), ctxJobName, job.Name)
-	if job.Timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, job.Timeout)
-		defer cancel()
-	}
-
-	data, err := exe.retryToRunJob(ctx, job)
-	exe.setTaskStatus(job.Name, false)
-	exe.results <- taskResult{
-		Job:  job,
-		Prev: prev,
-		Next: next,
-		Cost: time.Now().Sub(prev),
-		Data: data,
-		Err:  err,
-	}
-}
-
-func (exe *Executor) retryToRunJob(ctx context.Context, job Job) (data interface{}, err error) {
+func (e *Executor) runJob(job Job, now time.Time, timeout time.Duration) (
+	data interface{}, err error) {
 	defer func() {
 		if e := recover(); e != nil {
-			err = fmt.Errorf("job '%s' panic: %v", job.Name, err)
+			err = fmt.Errorf("panic: %v", e)
 		}
 	}()
 
-	for _, m := range exe.middlewares {
-		job = m(job)
+	var cancel func()
+	ctx := context.Background()
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
 	}
 
-	for number := 0; number <= job.Retry.Number; number-- {
-		if number > 0 && job.Retry.Interval > 0 {
-			time.Sleep(job.Retry.Interval)
-		}
-		if data, err = job.Run(ctx); err == nil {
-			return
-		}
-	}
+	data, err = job.Run(ctx, now)
 	return
-}
-
-func (exe *Executor) watchJob() {
-	rcbs := make([]func(Task, interface{}, error), 0, 64)
-	jcbs := make([]func(Job), 0, 8)
-	for {
-		select {
-		case <-exe.stop:
-			return
-		case job := <-exe.adds:
-			exe.lock.RLock()
-			jcbs = append(jcbs[:0], exe.addHooks...)
-			exe.lock.RUnlock()
-			for _, cb := range jcbs {
-				exe.runJobHook(cb, job)
-			}
-		case job := <-exe.deletes:
-			exe.lock.RLock()
-			jcbs = append(jcbs[:0], exe.deleteHooks...)
-			exe.lock.RUnlock()
-			for _, cb := range jcbs {
-				exe.runJobHook(cb, job)
-			}
-		case result := <-exe.results:
-			task := Task{
-				Job:  result.Job,
-				Prev: result.Prev,
-				Next: result.Next,
-				Cost: result.Cost,
-			}
-
-			// Run the job callback
-			if result.Job.Callback != nil {
-				exe.runJobCallback(result.Job.Callback, task, result.Data, result.Err)
-			}
-
-			// Run the global job callback
-			exe.lock.RLock()
-			rcbs = append(rcbs[:0], exe.resultHooks...)
-			exe.lock.RUnlock()
-			for _, cb := range rcbs {
-				exe.runJobCallback(cb, task, result.Data, result.Err)
-			}
-		}
-	}
-}
-
-func (exe *Executor) runJobHook(cb func(Job), job Job) {
-	defer recover()
-	cb(job)
-}
-
-func (exe *Executor) runJobCallback(cb func(Task, interface{}, error), t Task, d interface{}, e error) {
-	defer recover()
-	cb(t, d, e)
 }

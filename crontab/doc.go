@@ -22,7 +22,7 @@
 
 /*
 Package crontab implements the function of crontab, which is ported from
-github.com/robfig/cron.
+github.com/robfig/cron@v3.0.1.
 
 CRON Expression Format
 
@@ -41,6 +41,13 @@ Month and Day-of-week field values are case insensitive.  "SUN", "Sun", and
 
 The specific interpretation of the format is based on the Cron Wikipedia page:
 https://en.wikipedia.org/wiki/Cron
+
+Alternative Formats
+
+Alternative crontab expression formats support other fields like seconds.
+You can implement that by creating a custom Parser as follows.
+
+	NewParser(SecondOptional | Minute | Hour | Dom | Month | Dow | Descriptor)
 
 Special Characters
 
@@ -91,13 +98,20 @@ Time zones
 By default, all interpretation and scheduling is done in the machine's local
 time zone (time.Local). You can specify a different time zone on construction:
 
+	p := NewParser(SecondOptional | Minute | Hour | Dom | Month | Dow | Descriptor)
+	p.Location = time.UTC
+
+Individual cron schedules may also override the time zone they are to be
+interpreted in by providing an additional space-separated field at the beginning
+of the cron spec, of the form "CRON_TZ=Asia/Tokyo".
+
 For example:
 
 	# Runs at 6am in time.Local
-	StandardParser.Parse("0 6 * * ?")
+	ParseStandard("0 6 * * ?")
 
-	# Runs at 6am in Asia/Tokyo
-	StandardParser.Parse("CRON_TZ=Asia/Tokyo 0 6 * * ?")
+	# Runs at 6am in America/New_York
+	ParseStandard("CRON_TZ=America/New_York 0 6 * * ?")
 
 The prefix "TZ=(TIME ZONE)" is also supported for legacy compatibility.
 */

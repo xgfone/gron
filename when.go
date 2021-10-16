@@ -1,4 +1,4 @@
-// Copyright 2019 xgfone
+// Copyright 2021 xgfone
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,16 +16,29 @@ package gron
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/xgfone/gron/crontab"
 )
 
-// Every is equal to ParseWhen("@every d").
-func Every(d time.Duration) When {
-	return &whenT{orig: "@every " + d.String(), every: d}
+// CronSpecParser is the parser to parse the cron specification expression.
+var CronSpecParser = crontab.NewParser(crontab.SecondOptional |
+	crontab.Minute |
+	crontab.Hour |
+	crontab.Dom |
+	crontab.Month |
+	crontab.Dow |
+	crontab.Descriptor)
+
+// Every is equal to ParseWhen("@every interval").
+func Every(interval time.Duration) When {
+	return &when{spec: "@every " + interval.String(), every: interval}
+}
+
+// EveryWithDelay is the same as Every, but delay to run the job for delay duration.
+func EveryWithDelay(interval, delay time.Duration) When {
+	return &when{spec: "@every " + interval.String(), every: interval, delay: delay}
 }
 
 // MustParseWhen is the same as ParseWhen, but panic if there is an error.
@@ -37,174 +50,57 @@ func MustParseWhen(s string) When {
 	return w
 }
 
-// ParseWhen parses s to a when implementation.
+// ParseWhen parses the spec to a when implementation, which uses and returns
+// the UTC time.
 //
-// s is made of directives, which follow behind a character '@' and maybe have
-// a argument. And the directives and its arguments are separated by one or more
-// spaces.
+// spec supports CRON Expression Format, see https://en.wikipedia.org/wiki/Cron,
+// which also supports one of several pre-defined schedules like this:
 //
-// The supported directives have
-//   @base  now/prev // The next time is based on the now or previous(default) time to be calculated.
-//   @every Duration // The next time is calculated by adding the interval duration.
-//   @delay Duration // For the first time, it will be delayed back for the duration.
-//   @end   RFC3339  // When the deadline is reached, the job will end.
-//   @total int(>0)  // When the job is run for total times, it will end.
-//   @once           // It is equal to "@total 1".
-//   @at    crontab  // Crontab format, which is implemented by the sub-package crontab.
+//     Entry                  | Description                                | Equivalent To
+//     -----                  | -----------                                | -------------
+//     @yearly (or @annually) | Run once a year, midnight, Jan. 1st        | 0 0 1 1 *
+//     @monthly               | Run once a month, midnight, first of month | 0 0 1 * *
+//     @weekly                | Run once a week, midnight between Sat/Sun  | 0 0 * * 0
+//     @daily (or @midnight)  | Run once a day, midnight                   | 0 0 * * *
+//     @hourly                | Run once an hour, beginning of hour        | 0 * * * *
+//     @every Duration        | Run once every interval duration           |
 //
-func ParseWhen(s string) (When, error) {
-	if s = strings.TrimSpace(s); len(s) < 2 {
-		return nil, fmt.Errorf("When: missing directive")
-	} else if s[0] != '@' {
-		return nil, fmt.Errorf("When: directive must start with @")
+func ParseWhen(spec string) (When, error) {
+	spec = strings.TrimSpace(spec)
+	if strings.HasPrefix(spec, "@every ") {
+		interval, err := time.ParseDuration(spec[7:])
+		if err != nil {
+			return nil, fmt.Errorf("When: invalid 'every' argument: '%s'", spec[7:])
+		}
+		return &when{spec: spec, every: interval}, nil
 	}
 
-	directives := make(map[string]string, 32)
-	for _, item := range strings.Split(s[1:], "@") {
-		if item = strings.TrimSpace(item); item == "" {
-			return nil, fmt.Errorf("When: missing directive")
-		}
-
-		var arg string
-		directive := item
-		if index := strings.IndexByte(item, ' '); index > 0 {
-			directive = item[:index]
-			arg = strings.TrimSpace(item[index+1:])
-		}
-		if _, ok := directives[directive]; ok {
-			return nil, fmt.Errorf("When: reduplicative '%s' directive", directive)
-		}
-		directives[directive] = arg
+	scheduler, err := CronSpecParser.Parse(spec)
+	if err != nil {
+		return nil, err
 	}
 
-	var basenow bool
-	var total int
-	var end time.Time
-	var every time.Duration
-	var delay time.Duration
-
-	for directive, arg := range directives {
-		// TODO: check the compatibility between directives
-		switch directive {
-		case "base":
-			switch arg {
-			case "now":
-				basenow = true
-			case "prev":
-			default:
-				return nil, fmt.Errorf("When: invalid 'base' directive argument: '%s'", arg)
-			}
-		case "total":
-			n, err := strconv.ParseUint(arg, 10, 32)
-			if err != nil {
-				return nil, fmt.Errorf("When: invalid 'total' directive argument: '%s'", arg)
-			}
-			total = int(n)
-		case "once":
-			if arg != "" {
-				return nil, fmt.Errorf("When: 'once' directive must not have the argument")
-			}
-			total = 1
-		case "end":
-			t, err := time.Parse(time.RFC3339, arg)
-			if err != nil {
-				return nil, fmt.Errorf("When: invalid 'end' directive argument: '%s'", arg)
-			}
-			end = t
-		case "every":
-			d, err := time.ParseDuration(arg)
-			if err != nil {
-				return nil, fmt.Errorf("When: invalid 'every' directive argument: '%s'", arg)
-			}
-			every = d
-		case "delay":
-			d, err := time.ParseDuration(arg)
-			if err != nil {
-				return nil, fmt.Errorf("When: invalid 'delay' directive argument: '%s'", arg)
-			}
-			delay = d
-
-		case "at": // for cron format
-			return crontab.StandardParser.Parse(arg)
-
-		// case "yearly":
-		// case "monthly":
-		// case "weekly":
-		// case "daily", "midnight":
-		// case "hourly":
-		// case "minutely":
-		default:
-			return nil, fmt.Errorf("invalid when directive '%s'", directive)
-		}
-	}
-
-	return &whenT{
-		orig:    s,
-		basenow: basenow,
-		total:   total,
-		every:   every,
-		delay:   delay,
-		end:     end,
-	}, nil
+	scheduler.Location = time.UTC
+	return &when{spec: spec, sched: scheduler}, nil
 }
 
-type whenT struct {
-	orig string
-
-	count int
-	total int
-	end   time.Time
+type when struct {
+	spec  string
 	delay time.Duration
 	every time.Duration
-
-	basenow bool
+	sched *crontab.SpecSchedule
 }
 
-func (w *whenT) String() string {
-	return w.orig
-}
+func (w *when) String() string { return w.spec }
 
-func (w *whenT) validateNext(next time.Time) time.Time {
-	if !w.end.IsZero() && next.After(w.end) {
-		return time.Time{}
-	} else if !w.basenow {
-		if now := time.Now(); now.After(next) {
-			return now
-		}
-	}
-	return next
-}
-
-func (w *whenT) Next(prev time.Time) (next time.Time) {
-	// End
-	if w.total > 0 {
-		if w.count >= w.total {
-			return
-		}
-		w.count++
-	}
-
-	// First time
-	if prev.IsZero() {
-		next = time.Now()
-		if w.delay > 0 {
-			next = next.Add(w.delay)
-		}
-		if !w.end.IsZero() && next.After(w.end) {
-			return time.Time{}
-		}
-		return
-	} else if w.basenow {
-		prev = time.Now()
-	}
-
-	if w.delay > 0 {
-		prev = prev.Add(w.delay)
+func (w *when) Next(prev time.Time) (next time.Time) {
+	if prev.IsZero() { // First time
+		prev = time.Now().UTC()
 	}
 
 	if w.every > 0 {
-		return w.validateNext(prev.Add(w.every))
+		return prev.Add(w.every)
 	}
 
-	return w.validateNext(next)
+	return w.sched.Next(prev)
 }

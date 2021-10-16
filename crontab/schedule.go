@@ -31,9 +31,6 @@ type SpecSchedule struct {
 
 	// Override location for this schedule.
 	Location *time.Location
-
-	// Spec is the string representation. Optional.
-	Spec string
 }
 
 // bounds provides a range of acceptable values (plus a map of name to value).
@@ -77,8 +74,6 @@ const (
 	// Set the top bit if a star was included in the expression.
 	starBit = 1 << 63
 )
-
-func (s *SpecSchedule) String() string { return s.Spec }
 
 // Next returns the next time this schedule is activated, greater than the given
 // time.  If no time can be found to satisfy the schedule, return the zero time.

@@ -30,14 +30,13 @@ import (
 	"time"
 )
 
-// ParseOption is the configuration option to create a parser.
-//
+// ParseOption is the configuration options for creating a parser.
 // Most options specify which fields should be included, while others enable
 // features. If a field is not included the parser will assume a default value.
 // These options do not change the order fields are parse in.
 type ParseOption int
 
-// Predefine some parser options.
+// Pre-define some parser options.
 const (
 	Second         ParseOption = 1 << iota // Seconds field, default 0
 	SecondOptional                         // Optional seconds field, default 0
@@ -68,7 +67,7 @@ var defaults = []string{
 	"*",
 }
 
-// Parser is a custom Parser that can be configured.
+// Parser is a custom parser that can be configured.
 type Parser struct {
 	options ParseOption
 }
@@ -110,8 +109,6 @@ func NewParser(options ParseOption) Parser {
 // It returns a descriptive error if the spec is not valid.
 // It accepts crontab specs and features configured by NewParser.
 func (p Parser) Parse(spec string) (*SpecSchedule, error) {
-	spec = strings.TrimSpace(spec)
-	origSpec := spec
 	if len(spec) == 0 {
 		return nil, fmt.Errorf("empty spec string")
 	}
@@ -133,7 +130,7 @@ func (p Parser) Parse(spec string) (*SpecSchedule, error) {
 		if p.options&Descriptor == 0 {
 			return nil, fmt.Errorf("parser does not accept descriptors: %v", spec)
 		}
-		return parseDescriptor(origSpec, spec, loc)
+		return parseDescriptor(spec, loc)
 	}
 
 	// Split on whitespace.
@@ -175,7 +172,6 @@ func (p Parser) Parse(spec string) (*SpecSchedule, error) {
 		Month:    month,
 		Dow:      dayofweek,
 		Location: loc,
-		Spec:     origSpec,
 	}, nil
 }
 
@@ -241,8 +237,7 @@ func normalizeFields(fields []string, options ParseOption) ([]string, error) {
 	return expandedFields, nil
 }
 
-// StandardParser is the standard parser.
-var StandardParser = NewParser(
+var standardParser = NewParser(
 	Minute | Hour | Dom | Month | Dow | Descriptor,
 )
 
@@ -253,9 +248,9 @@ var StandardParser = NewParser(
 //
 // It accepts
 //   - Standard crontab specs, e.g. "* * * * ?"
-//   - Descriptors, e.g. "@midnight", "@every 1h30m"
+//   - Descriptors, e.g. "@midnight".
 func ParseStandard(standardSpec string) (*SpecSchedule, error) {
-	return StandardParser.Parse(standardSpec)
+	return standardParser.Parse(standardSpec)
 }
 
 // getField returns an Int with the bits set representing all of the times that
@@ -390,7 +385,7 @@ func all(r bounds) uint64 {
 }
 
 // parseDescriptor returns a predefined schedule for the expression, or error if none matches.
-func parseDescriptor(origSpec, descriptor string, loc *time.Location) (*SpecSchedule, error) {
+func parseDescriptor(descriptor string, loc *time.Location) (*SpecSchedule, error) {
 	switch descriptor {
 	case "@yearly", "@annually":
 		return &SpecSchedule{
@@ -401,7 +396,6 @@ func parseDescriptor(origSpec, descriptor string, loc *time.Location) (*SpecSche
 			Month:    1 << months.min,
 			Dow:      all(dow),
 			Location: loc,
-			Spec:     origSpec,
 		}, nil
 
 	case "@monthly":
@@ -413,7 +407,6 @@ func parseDescriptor(origSpec, descriptor string, loc *time.Location) (*SpecSche
 			Month:    all(months),
 			Dow:      all(dow),
 			Location: loc,
-			Spec:     origSpec,
 		}, nil
 
 	case "@weekly":
@@ -425,7 +418,6 @@ func parseDescriptor(origSpec, descriptor string, loc *time.Location) (*SpecSche
 			Month:    all(months),
 			Dow:      1 << dow.min,
 			Location: loc,
-			Spec:     origSpec,
 		}, nil
 
 	case "@daily", "@midnight":
@@ -437,7 +429,6 @@ func parseDescriptor(origSpec, descriptor string, loc *time.Location) (*SpecSche
 			Month:    all(months),
 			Dow:      all(dow),
 			Location: loc,
-			Spec:     origSpec,
 		}, nil
 
 	case "@hourly":
@@ -449,7 +440,6 @@ func parseDescriptor(origSpec, descriptor string, loc *time.Location) (*SpecSche
 			Month:    all(months),
 			Dow:      all(dow),
 			Location: loc,
-			Spec:     origSpec,
 		}, nil
 
 	default:

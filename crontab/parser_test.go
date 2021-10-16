@@ -1,3 +1,25 @@
+// Copyright (C) 2012 Rob Figueiredo
+// All Rights Reserved.
+//
+// MIT LICENSE
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy of
+// this software and associated documentation files (the "Software"), to deal in
+// the Software without restriction, including without limitation the rights to
+// use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+// the Software, and to permit persons to whom the Software is furnished to do so,
+// subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+// FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+// COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+// IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+// CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 package crontab
 
 import (
@@ -144,9 +166,9 @@ func TestParseSchedule(t *testing.T) {
 		expected *SpecSchedule
 	}{
 		{secondParser, "0 5 * * * *", every5min(time.Local)},
-		{StandardParser, "5 * * * *", every5min(time.Local)},
+		{standardParser, "5 * * * *", every5min(time.Local)},
 		{secondParser, "CRON_TZ=UTC  0 5 * * * *", every5min(time.UTC)},
-		{StandardParser, "CRON_TZ=UTC  5 * * * *", every5min(time.UTC)},
+		{standardParser, "CRON_TZ=UTC  5 * * * *", every5min(time.UTC)},
 		{secondParser, "CRON_TZ=Asia/Tokyo 0 5 * * * *", every5min(tokyo)},
 		{secondParser, "@midnight", midnight(time.Local)},
 		{secondParser, "TZ=UTC  @midnight", midnight(time.UTC)},
@@ -169,7 +191,6 @@ func TestParseSchedule(t *testing.T) {
 	}
 
 	for _, c := range entries {
-		c.expected.Spec = c.expr
 		actual, err := c.parser.Parse(c.expr)
 		if err != nil {
 			t.Errorf("%s => unexpected error %v", c.expr, err)
@@ -192,7 +213,6 @@ func TestOptionalSecondSchedule(t *testing.T) {
 	}
 
 	for _, c := range entries {
-		c.expected.Spec = c.expr
 		actual, err := parser.Parse(c.expr)
 		if err != nil {
 			t.Errorf("%s => unexpected error %v", c.expr, err)
@@ -320,7 +340,7 @@ func TestStandardSpecSchedule(t *testing.T) {
 	}{
 		{
 			expr:     "5 * * * *",
-			expected: &SpecSchedule{1 << seconds.min, 1 << 5, all(hours), all(dom), all(months), all(dow), time.Local, ""},
+			expected: &SpecSchedule{1 << seconds.min, 1 << 5, all(hours), all(dom), all(months), all(dow), time.Local},
 		},
 		{
 			expr: "5 j * * *",
@@ -333,10 +353,6 @@ func TestStandardSpecSchedule(t *testing.T) {
 	}
 
 	for _, c := range entries {
-		if c.expected != nil {
-			c.expected.Spec = c.expr
-		}
-
 		actual, err := ParseStandard(c.expr)
 		if len(c.err) != 0 && (err == nil || !strings.Contains(err.Error(), c.err)) {
 			t.Errorf("%s => expected %v, got %v", c.expr, c.err, err)
@@ -345,21 +361,21 @@ func TestStandardSpecSchedule(t *testing.T) {
 			t.Errorf("%s => unexpected error %v", c.expr, err)
 		}
 		if !reflect.DeepEqual(actual, c.expected) {
-			t.Errorf("%s => expected %#v, got %#v", c.expr, c.expected, actual)
+			t.Errorf("%s => expected %+v, got %+v", c.expr, c.expected, actual)
 		}
 	}
 }
 
 func every5min(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), all(dow), loc, ""}
+	return &SpecSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), all(dow), loc}
 }
 
 func every5min5s(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1 << 5, 1 << 5, all(hours), all(dom), all(months), all(dow), loc, ""}
+	return &SpecSchedule{1 << 5, 1 << 5, all(hours), all(dom), all(months), all(dow), loc}
 }
 
 func midnight(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1, 1, 1, all(dom), all(months), all(dow), loc, ""}
+	return &SpecSchedule{1, 1, 1, all(dom), all(months), all(dow), loc}
 }
 
 func annual(loc *time.Location) *SpecSchedule {
