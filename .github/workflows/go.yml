@@ -26,4 +26,8 @@ jobs:
       uses: actions/setup-go@v2
       with:
         go-version: ${{ matrix.go }}
-    - run: go test -race
+    - run: |
+        mkdir -p /home/runner/go/src/github.com/xgfone
+        rm -rf /home/runner/go/src/github.com/xgfone/gron
+        cp -r /home/runner/work/gron/gron /home/runner/go/src/github.com/xgfone/gron
+        go test -race
