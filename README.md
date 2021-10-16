@@ -1,6 +1,6 @@
 # gron [![Build Status](https://github.com/xgfone/gron/actions/workflows/go.yml/badge.svg)](https://github.com/xgfone/gron/actions/workflows/go.yml) [![GoDoc](https://pkg.go.dev/badge/github.com/xgfone/gron)](https://pkg.go.dev/github.com/xgfone/gron) [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square)](https://raw.githubusercontent.com/xgfone/gron/master/LICENSE)
 
-Another job periodic runner like `crontab` supporting `Go1.11+`
+Another job periodic runner like `crontab` supporting `Go1.7+`
 
 ## Example
 
