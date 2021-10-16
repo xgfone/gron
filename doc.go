@@ -34,7 +34,7 @@
 //      }
 //
 //      func jobResultHook(result gron.JobResult) {
-//      	fmt.Printf("End to run job '%s', cost '%s'.\n", result.Name(), result.Cost)
+//      	fmt.Printf("End to run job '%s', cost '%s'.\n", result.Job.Name(), result.Cost)
 //      }
 //
 //      func main() {
