@@ -93,9 +93,16 @@ func (t *task) Task() Task {
 
 type tasks []*task
 
-func (ts tasks) Len() int           { return len(ts) }
-func (ts tasks) Less(i, j int) bool { return ts[j].Next.After(ts[i].Next) }
-func (ts tasks) Swap(i, j int)      { ts[i], ts[j] = ts[j], ts[i] }
+func (ts tasks) Len() int      { return len(ts) }
+func (ts tasks) Swap(i, j int) { ts[i], ts[j] = ts[j], ts[i] }
+func (ts tasks) Less(i, j int) bool {
+	if ts[i] == nil {
+		return false
+	} else if ts[j] == nil {
+		return true
+	}
+	return ts[j].Next.After(ts[i].Next)
+}
 
 // Executor represents a task executor.
 type Executor struct {
@@ -171,23 +178,24 @@ func (e *Executor) CancelJobs(names ...string) {
 }
 
 func (e *Executor) cancelJobs(names ...string) {
-	for i := len(e.tasks) - 1; i >= 0; i-- {
-		if inStrings(e.tasks[i].Job.Name(), names) {
-			_len := len(e.tasks)
-			copy(e.tasks[i:_len], e.tasks[i+1:_len])
-			e.tasks = e.tasks[:_len-1]
+	var num int
+	_len := len(e.tasks)
+	for _, name := range names {
+		for i := 0; i < _len; i++ {
+			if e.tasks[i] != nil && e.tasks[i].Job.Name() == name {
+				e.tasks[i] = nil
+				num++
+				break
+			}
 		}
 	}
-	return
-}
 
-func inStrings(s string, ss []string) bool {
-	for _, _s := range ss {
-		if _s == s {
-			return true
-		}
+	if num > 0 {
+		sort.Stable(e.tasks)
+		e.tasks = e.tasks[:_len-num]
 	}
-	return false
+
+	return
 }
 
 // GetTask returns the job task by the name.
