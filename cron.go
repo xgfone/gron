@@ -95,7 +95,7 @@ type tasks []*task
 
 func (ts tasks) Len() int           { return len(ts) }
 func (ts tasks) Less(i, j int) bool { return ts[j].Next.After(ts[i].Next) }
-func (ts tasks) Swap(i, j int)      { t := ts[i]; ts[i] = ts[j]; ts[j] = t }
+func (ts tasks) Swap(i, j int)      { ts[i], ts[j] = ts[j], ts[i] }
 
 // Executor represents a task executor.
 type Executor struct {
