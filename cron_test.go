@@ -21,7 +21,7 @@ func TestTasks(t *testing.T) {
 	for i, task := range ts {
 		if i >= 4 {
 			if task != nil {
-				t.Errorf("expected job 'nil', but got job '%s'", t.Name())
+				t.Errorf("expected job 'nil', but got job '%s'", task.Job.Name())
 			}
 		} else if v := task.Next.Unix(); v != int64(i+1) {
 			t.Errorf("expected job%d, but got job%d", i+1, v)
